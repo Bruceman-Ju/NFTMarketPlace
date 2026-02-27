@@ -5,11 +5,12 @@ import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/acce
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
-contract NFTMarketPlace is Initializable, ReentrancyGuard, PausableUpgradeable, AccessControlUpgradeable, UUPSUpgradeable, IERC721Receiver {
+import "hardhat/console.sol";
+
+contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgradeable, UUPSUpgradeable, IERC721Receiver {
     // --- Roles ---
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
@@ -22,7 +23,7 @@ contract NFTMarketPlace is Initializable, ReentrancyGuard, PausableUpgradeable, 
     address public platformWalletAddress;
     // e.g. 100 = 1%
     uint256 public platformFee;
-    uint256 public LISTING_DURATION = 30 days;
+    uint256 public listingDuration;
 
     // --- Struct & enum & mappings---
     struct ListedNFT {
@@ -36,12 +37,8 @@ contract NFTMarketPlace is Initializable, ReentrancyGuard, PausableUpgradeable, 
 
     mapping(bytes32 => ListedNFT) public listedNFTs;
 
-    // --- Constructor ---
-    constructor() {
-        _disableInitializers();
-    }
-
-    function initialize(address defaultAdmin, address pauser, address upgrader, address _wallet,uint256 _platformFee)
+    function initialize(
+        address defaultAdmin, address pauser, address upgrader,address _logicOperator, address _wallet,uint256 _platformFee)
     public
     initializer
     {
@@ -54,35 +51,43 @@ contract NFTMarketPlace is Initializable, ReentrancyGuard, PausableUpgradeable, 
         _grantRole(DEFAULT_ADMIN_ROLE, defaultAdmin);
         _grantRole(PAUSER_ROLE, pauser);
         _grantRole(UPGRADER_ROLE, upgrader);
+        _grantRole(LOGIC_ROLE, _logicOperator);
 
         platformWalletAddress = _wallet;
         platformFee = _platformFee;
+        listingDuration = 30 days;
     }
 
     // --- Logic functions ---
     function listNFT(address _nftAddress, uint256 tokenId, uint256 price)
     public
     whenNotPaused
-    nonReentrant
     {
         require(_nftAddress != address(0),"NFT address invalid");
         require(price > 0,"NFT price less than 0");
-        address owner = msg.sender;
-        require(IERC721(_nftAddress).ownerOf(tokenId) == owner,"Target NFT not belong to owner");
-        bool isApproved =
-            IERC721(_nftAddress).getApproved(tokenId) == address(this) ||
-            IERC721(_nftAddress).isApprovedForAll(owner, address(this));
-        require(isApproved,"NFT not approved for marketplace");
+        // check whether _nftAddress is instance of IERC721
         require(
             IERC165(_nftAddress).supportsInterface(ERC721_INTERFACE_ID),
             "Not ERC721"
         );
 
-        uint256 expiredAt = block.timestamp + LISTING_DURATION;
+        // check whether nft exist
+        address owner;
+        try IERC721(_nftAddress).ownerOf(tokenId) returns (address _owner) {
+            owner = _owner;
+        } catch {
+            revert("NFT does not exist");
+        }
+
+        require(msg.sender == owner,"Target NFT not belong to owner");
+        bool isApproved =
+            IERC721(_nftAddress).getApproved(tokenId) == address(this) ||
+            IERC721(_nftAddress).isApprovedForAll(owner, address(this));
+        require(isApproved,"NFT not approved for marketplace");
+
+        uint256 expiredAt = block.timestamp + listingDuration;
 
         bytes32 listId = _getListedNFTId(_nftAddress, tokenId);
-        require(listedNFTs[listId].nftAddress == address(0),"NFT already listed");
-
         listedNFTs[listId] = ListedNFT(_nftAddress, tokenId, price, block.timestamp, owner,expiredAt);
 
         IERC721(_nftAddress).safeTransferFrom(owner, address(this), tokenId);
@@ -92,21 +97,25 @@ contract NFTMarketPlace is Initializable, ReentrancyGuard, PausableUpgradeable, 
 
     function buyNFT(bytes32 listId)
     public
-    whenNotExpired(listId)
     whenNotPaused
-    nonReentrant
+    whenNotExpired(listId)
     payable
     {
         ListedNFT storage nft = listedNFTs[listId];
 
-        uint256 feeAmount = (nft.price * platformFee) / 10000;
-        uint256 amount = nft.price - feeAmount;
-        require(msg.value == nft.price,"Must send exact amount");
+        address nftAddress_ = nft.nftAddress;
+        uint256 price_ = nft.price;
+        address seller_ = nft.seller;
+        uint256 tokenId_ = nft.tokenId;
 
         delete listedNFTs[listId];
 
+        uint256 feeAmount = (price_ * platformFee) / 10000;
+        uint256 amount = price_ - feeAmount;
+        require(msg.value == price_,"Must send exact amount");
+
         if (amount > 0){
-            (bool stateTransfer,) = payable(nft.seller).call{value: amount}("");
+            (bool stateTransfer,) = payable(seller_).call{value: amount}("");
             require(stateTransfer, "Failed to transfer eth amount");
         }
 
@@ -115,40 +124,47 @@ contract NFTMarketPlace is Initializable, ReentrancyGuard, PausableUpgradeable, 
             require(stateFee, "Failed to collect fee");
         }
 
-        IERC721(nft.nftAddress).safeTransferFrom(address(this), msg.sender, nft.tokenId);
+        IERC721(nftAddress_).safeTransferFrom(address(this), msg.sender, tokenId_);
 
-        emit NFTSold(listId, nft.nftAddress, nft.tokenId, nft.price, block.timestamp, nft.seller, msg.sender);
+        emit NFTSold(listId, nftAddress_, tokenId_, price_, block.timestamp, seller_, msg.sender);
     }
 
-    function cancelNFT(bytes32 listId)
+    function cancelListing(bytes32 listId)
     public
-    whenNotExpired(listId)
     whenNotPaused
-    nonReentrant
+    whenNotExpired(listId)
     {
         ListedNFT storage nft = listedNFTs[listId];
         require(nft.seller == msg.sender,"Only seller can cancel NFT");
 
-        delete listedNFTs[listId];
-        IERC721(nft.nftAddress).safeTransferFrom(address(this), nft.seller, nft.tokenId);
+        address nftAddress_ = nft.nftAddress;
+        address seller_ = nft.seller;
+        uint256 tokenId_ = nft.tokenId;
 
-        emit NFTCanceled(listId, nft.nftAddress, nft.tokenId, block.timestamp, msg.sender);
+        delete listedNFTs[listId];
+
+        IERC721(nftAddress_).safeTransferFrom(address(this), seller_, tokenId_);
+
+        emit NFTCanceled(listId, nftAddress_, tokenId_, block.timestamp, msg.sender);
     }
 
     function cleanupExpiredBatch(bytes32[] memory listIds)
     public
     onlyRole(LOGIC_ROLE)
     whenNotPaused
-    nonReentrant
     {
         address operator = msg.sender;
         for (uint256 i = 0; i < listIds.length; i++) {
             bytes32 listId = listIds[i];
             ListedNFT storage nft = listedNFTs[listId];
             if (nft.nftAddress != address(0) && nft.expiredAt < block.timestamp) {
+                address nftAddress_ = nft.nftAddress;
+                if(!IERC165(nftAddress_).supportsInterface(ERC721_INTERFACE_ID)) continue;
+                address seller_ = nft.seller;
+                uint256 tokenId_ = nft.tokenId;
                 delete listedNFTs[listId];
-                IERC721(nft.nftAddress).safeTransferFrom(address(this), nft.seller, nft.tokenId);
-                emit NFTExpired(listId, nft.nftAddress, nft.tokenId, block.timestamp, operator);
+                IERC721(nftAddress_).safeTransferFrom(address(this), seller_, tokenId_);
+                emit NFTExpired(listId, nftAddress_, tokenId_, block.timestamp, operator);
             }
         }
     }
@@ -193,7 +209,7 @@ contract NFTMarketPlace is Initializable, ReentrancyGuard, PausableUpgradeable, 
     public
     onlyRole(LOGIC_ROLE)
     {
-        LISTING_DURATION = _duration;
+        listingDuration = _duration;
     }
 
     function pause() public onlyRole(PAUSER_ROLE) {
