@@ -1,8 +1,11 @@
 require("@nomicfoundation/hardhat-toolbox");
-require("@nomicfoundation/hardhat-ethers");
-require("hardhat-deploy");
-require("hardhat-deploy-ethers");
 require("@openzeppelin/hardhat-upgrades");
+require("dotenv").config();
+require("@nomicfoundation/hardhat-verify");
+
+const MAINNET_RPC_URL = process.env.MAINNET_RPC_URL
+const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -16,25 +19,23 @@ module.exports = {
       }
     }
   },
-  namedAccounts: {
-    deployer: {
-      default: 0
+  networks: {
+    hardhat: {
+      forking: {
+        url: MAINNET_RPC_URL,
+        enabled: process.env.FORK === "true",
+      },
     },
-    pauseUser: {
-      default: 1
+    sepolia: {
+      url: SEPOLIA_RPC_URL,
+      accounts: [PRIVATE_KEY],
     },
-    upgradeUser: {
-      default: 2
+  },
+  etherscan: {
+    apiKey: {
+      sepolia: process.env.ETHERSCAN_API_KEY,
+      mainnet: process.env.ETHERSCAN_API_KEY,
     },
-    platformWalletAddress: {
-      default: 3
-    },
-    logicOperator: {
-      default: 4
-    },
-    normalUser: {
-      default: 5
-    }
   },
   gasReporter: {
     enabled: false,  // 将 true 改为 false
