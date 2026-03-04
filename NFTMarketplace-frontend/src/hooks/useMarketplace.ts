@@ -7,7 +7,7 @@ import {
 } from 'wagmi';
 import { parseEther } from 'viem';
 import { marketplaceContract } from '../contracts/marketplace';
-import { generateListId } from '../utils/listId';
+
 
 // 定义 ListedNFT 类型
 interface ListedNFT {
@@ -37,8 +37,8 @@ export function useMarketplace() {
         if (!address) throw new Error('Not connected');
 
         const price = parseEther(priceInEth); // ETH → Wei
-        const id = generateListId(nftAddress, tokenId);
-        setListId(id);
+        // const id = generateListId(nftAddress, tokenId);
+        // setListId(id);
 
         // Step 1: Approve marketplace
         await listNFT({
@@ -61,6 +61,7 @@ export function useMarketplace() {
             ...marketplaceContract,
             functionName: 'listNFT',
             args: [nftAddress, tokenId, price],
+            gas: 1_000_000n, // 通常 500k~1M 足够
         });
     };
 

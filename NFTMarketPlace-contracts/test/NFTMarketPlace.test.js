@@ -491,19 +491,15 @@ describe("NFTMarketPlace", function () {
 
     describe("onERC721Received", () => {
         it("Should return correct selector when not paused", async () => {
-            const selector = await marketplace.onERC721Received(ethers.ZeroAddress, ethers.ZeroAddress, 0, "0x");
+            const selector = await marketplace.onERC721Received.staticCall(ethers.ZeroAddress, ethers.ZeroAddress, 0, "0x");
+            console.log( selector);
             expect(selector).to.equal("0x150b7a02");
         });
 
         it("Should revert if paused (view function, so no revert in practice, but modifier is applied)", async () => {
-            // Note: view functions don't revert on modifiers that check state like pause,
-            // but the modifier `whenNotPaused` includes a require, so it WILL revert.
             await marketplace.connect(pauser).pause();
             await expect(marketplace.onERC721Received(ethers.ZeroAddress, ethers.ZeroAddress, 0, "0x"))
-                .to.be.revertedWithCustomError(
-                    marketplace,
-                    "EnforcedPause"
-                );;
+                .to.be.revertedWith("Can't receive NFT when contract paused.");
         });
     });
 });

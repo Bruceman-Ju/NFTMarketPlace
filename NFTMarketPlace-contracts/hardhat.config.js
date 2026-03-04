@@ -2,6 +2,7 @@ require("@nomicfoundation/hardhat-toolbox");
 require("@openzeppelin/hardhat-upgrades");
 require("dotenv").config();
 require("@nomicfoundation/hardhat-verify");
+require('hardhat-gas-reporter');
 
 const MAINNET_RPC_URL = process.env.MAINNET_RPC_URL
 const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL

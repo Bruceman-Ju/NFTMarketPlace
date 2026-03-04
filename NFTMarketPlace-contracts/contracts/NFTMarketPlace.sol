@@ -230,7 +230,8 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
         address,
         uint256,
         bytes memory
-    ) public virtual whenNotPaused view returns (bytes4) {
+    ) external view returns (bytes4) {
+        require(!paused(),"Can't receive NFT when contract paused.");
         return IERC721Receiver.onERC721Received.selector;
     }
 

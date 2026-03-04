@@ -3,7 +3,6 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
 import { useState, useEffect } from 'react';
 import { useMarketplace } from './hooks/useMarketplace';
-import { generateListId } from './utils/listId';
 import { parseEther } from 'viem';
 
 function App() {
@@ -40,7 +39,7 @@ function App() {
                 BigInt(tokenId),
                 price
             );
-            alert('NFT listed! Your listId: ' + marketplace.listId);
+            alert('NFT listed!');
         } catch (err) {
             console.error(err);
             alert('Listing failed');
@@ -63,17 +62,12 @@ function App() {
         try {
             await marketplace.cancelListing(inputListId as `0x${string}`);
             alert('Listing canceled');
+            setInputListId("");
         } catch (err) {
             console.error(err);
             alert('Cancel failed');
         }
     };
-
-    const handleCalculateListId = () => {
-        const id = generateListId(nftAddress as `0x${string}`, BigInt(tokenId));
-        setInputListId(id);
-    };
-
     return (
         <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto' }}>
             <header style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
@@ -108,17 +102,14 @@ function App() {
                         <button onClick={handleList} disabled={marketplace.isListing}>
                             {marketplace.isListing ? 'Listing...' : 'List NFT'}
                         </button>
-                        <button onClick={handleCalculateListId} style={{ marginLeft: '8px' }}>
-                            Calculate List ID
-                        </button>
-                        {marketplace.listId && (
-                            <p>
-                                <strong>Your List ID:</strong> {marketplace.listId}
-                            </p>
-                        )}
+                        {/*{marketplace.listId && (*/}
+                        {/*    <p>*/}
+                        {/*        <strong>Your List ID:</strong> {marketplace.listId}*/}
+                        {/*    </p>*/}
+                        {/*)}*/}
                     </section>
 
-                    {/* Buy / Cancel */}
+                    {/* Buy */}
                     <section>
                         <h2>Buy or Cancel Listing</h2>
                         <input
@@ -132,7 +123,7 @@ function App() {
                         <div style={{ backgroundColor: '#f0f0f0', padding: '10px', marginBottom: '10px' }}>
                             <p><strong>NFT Info:</strong></p>
                             <p>listId: {marketplace.listId || 'null'}</p>
-                            <p>listedNFT exists: {marketplace.listedNFT ? 'Yes' : 'No'}</p>
+                            <p>listedNFT exists: {marketplace.listedNFT?.price ? 'Yes' : 'No'}</p>
                             {marketplace.listedNFT && (
                                 <>
                                     <p>Price (wei): {marketplace.listedNFT.price?.toString()}</p>
@@ -141,7 +132,14 @@ function App() {
                                 </>
                             )}
                         </div>
-
+                        <button
+                            onClick={handleCancel}
+                            disabled={marketplace.isCanceling}
+                            style={{ marginLeft: '8px' }}
+                        >
+                            {marketplace.isCanceling ? 'Canceling...' : 'Cancel Listing'}
+                        </button>
+                        <div></div>
                         {marketplace.listedNFT?.price && (
                             <p>
                                 Price: {Number(marketplace.listedNFT.price) / 1e18} ETH
@@ -153,7 +151,6 @@ function App() {
                                 </button>
                             </p>
                         )}
-
                         <input
                             placeholder="Buy Price (ETH)"
                             value={buyPriceEth}
@@ -162,13 +159,6 @@ function App() {
                         />
                         <button onClick={handleBuy} disabled={marketplace.isBuying}>
                             {marketplace.isBuying ? 'Buying...' : 'Buy NFT'}
-                        </button>
-                        <button
-                            onClick={handleCancel}
-                            disabled={marketplace.isCanceling}
-                            style={{ marginLeft: '8px' }}
-                        >
-                            {marketplace.isCanceling ? 'Canceling...' : 'Cancel Listing'}
                         </button>
                     </section>
                 </>
