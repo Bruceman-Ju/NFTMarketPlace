@@ -18,12 +18,16 @@ describe("NFTMarketPlace", function () {
     let buyer;
     let platformWallet;
     let random;
+    let userMap = new Map();
 
     const PLATFORM_FEE = 100; // 1%
     const LISTING_DURATION = 30 * 24 * 60 * 60; // 30 days
 
     before(async () => {
         [owner, pauser, upgrader, logicOperator, seller, buyer, platformWallet, random] = await ethers.getSigners();
+
+        userMap.set(seller.address, 0);
+        userMap.set(buyer.address, 0);
 
         // Deploy Mock ERC721
         const MockNFT = await ethers.getContractFactory("MockNFT");
@@ -42,6 +46,16 @@ describe("NFTMarketPlace", function () {
         ], { initializer: 'initialize' });
         await marketplace.waitForDeployment();
     });
+
+    async function getListId(userAddress, nftAddress, tokenId) {
+
+        let userNonce = userMap.get(userAddress);
+        userMap.set(userAddress, userNonce+1);
+        return ethers.keccak256(
+            ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "uint256","address","uint256"],
+                [userAddress,userNonce, nftAddress, tokenId]));
+    }
 
     describe("Initialization", () => {
         it("Should set correct initial values", async () => {
@@ -74,15 +88,15 @@ describe("NFTMarketPlace", function () {
         it("Should list NFT successfully", async () => {
             const tokenId = 1;
             await mockNFT.mint(seller.address, tokenId);
-            listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
 
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
 
             await expect(marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("1")))
                 .to.emit(marketplace, "NFTListed");
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
 
             const listed = await marketplace.listedNFTs(listId);
+
             expect(listed.nftAddress).to.equal(await mockNFT.getAddress());
             expect(listed.tokenId).to.equal(tokenId);
             expect(listed.seller).to.equal(seller.address);
@@ -138,6 +152,7 @@ describe("NFTMarketPlace", function () {
             await mockNFT.mint(seller.address, tokenId);
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("1"));
+            await getListId(seller.address, await mockNFT.getAddress(), tokenId);
             await expect(marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("1")))
                 .to.be.revertedWith("Target NFT not belong to owner");
         });
@@ -153,13 +168,13 @@ describe("NFTMarketPlace", function () {
             // approve
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
             // list
+            // 除了 revert tests 之外，每次 listNFT,就计算一次 listId，这样就让 userNonce 与合约中的基数相同了。
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
-
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
             const sellerBalanceBefore = await ethers.provider.getBalance(seller.address);
             const platformBalanceBefore = await ethers.provider.getBalance(platformWallet.address);
 
             // buy
-            const listId = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
             await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") }))
                 .to.emit(marketplace, "NFTSold");
 
@@ -188,7 +203,7 @@ describe("NFTMarketPlace", function () {
             const tx = await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
             await tx.wait();
             tokenId = 111;
-            const listId = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
             await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") }))
                 .to.be.revertedWith("Target NFT not exist");
         });
@@ -202,8 +217,7 @@ describe("NFTMarketPlace", function () {
             // list
             const tx = await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
             await tx.wait();
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
 
             await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("1.9") }))
                 .to.be.revertedWith("Must send exact amount");
@@ -225,8 +239,7 @@ describe("NFTMarketPlace", function () {
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
 
             await timeTravel(LISTING_DURATION + 1);
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
             await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") }))
                 .to.be.revertedWith("NFT expired");
         });
@@ -243,8 +256,7 @@ describe("NFTMarketPlace", function () {
             // list
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
 
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
 
             await expect(marketplace.connect(seller).cancelListing(listId))
                 .to.emit(marketplace, "NFTCanceled");
@@ -261,7 +273,7 @@ describe("NFTMarketPlace", function () {
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
             // list
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
-
+            await getListId(seller.address, await mockNFT.getAddress(), tokenId)
             // mint
             tokenId = 220;
             await mockNFT.mint(buyer.address, tokenId);
@@ -270,8 +282,7 @@ describe("NFTMarketPlace", function () {
             // list
             await marketplace.connect(buyer).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
 
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(buyer.address, await mockNFT.getAddress(), tokenId);
             await expect(marketplace.connect(seller).cancelListing(listId))
                 .to.be.revertedWith("Only seller can cancel NFT");
         });
@@ -284,8 +295,7 @@ describe("NFTMarketPlace", function () {
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
             // list
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
             await timeTravel(LISTING_DURATION + 1);
             await expect(marketplace.connect(seller).cancelListing(listId))
                 .to.be.revertedWith("NFT expired");
@@ -302,8 +312,7 @@ describe("NFTMarketPlace", function () {
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
             // list
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
 
             await timeTravel(LISTING_DURATION + 1);
 
@@ -322,8 +331,7 @@ describe("NFTMarketPlace", function () {
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
             // list
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
 
             await timeTravel(LISTING_DURATION + 1);
             const fakeId = ethers.keccak256(ethers.toUtf8Bytes("fake"));
@@ -339,8 +347,7 @@ describe("NFTMarketPlace", function () {
             await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
             // list
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
 
             await timeTravel(LISTING_DURATION + 1);
             await expect(marketplace.connect(seller).cleanupExpiredBatch([listId])).to.be.revertedWithCustomError(
@@ -429,8 +436,7 @@ describe("NFTMarketPlace", function () {
 
             await marketplace.connect(pauser).pause();
 
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
             await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") }))
                 .to.be.revertedWithCustomError(
                     marketplace,
@@ -449,8 +455,7 @@ describe("NFTMarketPlace", function () {
 
             await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
 
-            const listId = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [await mockNFT.getAddress(), tokenId]));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
             await marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") });
 
             await marketplace.connect(pauser).pause();

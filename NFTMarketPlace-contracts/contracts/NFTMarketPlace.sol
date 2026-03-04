@@ -8,8 +8,6 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeab
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
-import "hardhat/console.sol";
-
 contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgradeable, UUPSUpgradeable, IERC721Receiver {
     // --- Roles ---
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
@@ -24,6 +22,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     // e.g. 100 = 1%
     uint256 public platformFee;
     uint256 public listingDuration;
+    mapping(address => uint256) private userNonce;
 
     // --- Struct & enum & mappings---
     struct ListedNFT {
@@ -98,7 +97,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     function buyNFT(bytes32 listId)
     public
     whenNotPaused
-    whenNotExpired(listId)
+    whenNFTExistAndNotExpired(listId)
     payable
     {
         ListedNFT storage nft = listedNFTs[listId];
@@ -132,7 +131,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     function cancelListing(bytes32 listId)
     public
     whenNotPaused
-    whenNotExpired(listId)
+    whenNFTExistAndNotExpired(listId)
     {
         ListedNFT storage nft = listedNFTs[listId];
         require(nft.seller == msg.sender,"Only seller can cancel NFT");
@@ -172,14 +171,14 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     // --- Internal functions & modifier---
     function _getListedNFTId(address _nftAddress, uint256 tokenId)
     internal
-    pure
     returns (bytes32)
     {
-        bytes32 listId = keccak256(abi.encode(_nftAddress, tokenId));
+        uint256 userNon = userNonce[msg.sender]++;
+        bytes32 listId = keccak256(abi.encode(msg.sender,userNon,_nftAddress, tokenId));
         return listId;
     }
 
-    modifier whenNotExpired(bytes32 listId) {
+    modifier whenNFTExistAndNotExpired(bytes32 listId) {
         ListedNFT storage nft = listedNFTs[listId];
         require(nft.nftAddress != address(0),"Target NFT not exist");
         require(nft.expiredAt >= block.timestamp,"NFT expired");
