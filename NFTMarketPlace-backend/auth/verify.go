@@ -20,6 +20,14 @@ func VerifyEIP191Signature(signatureHex, message, address string) (bool, error) 
 		return false, err
 	}
 
+	if len(sig) != 65 {
+		return false, fmt.Errorf("invalid signature length: expected 65 bytes, got %d", len(sig))
+	}
+
+	if sig[64] >= 27 {
+		sig[64] -= 27
+	}
+
 	// EIP-191: \x19Ethereum Signed Message:\n + len(message) + message
 	prefixedMsg := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(message), message)
 	hash := crypto.Keccak256Hash([]byte(prefixedMsg))

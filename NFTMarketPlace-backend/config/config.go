@@ -6,7 +6,8 @@ import (
 
 type Config struct {
 	Server struct {
-		Port int `mapstructure:"port"`
+		Port           int      `mapstructure:"port"`
+		AllowedOrigins []string `mapstructure:"allowed_origins"`
 	}
 	Database struct {
 		DSN string `mapstructure:"dsn"`
@@ -17,8 +18,11 @@ type Config struct {
 		DB       int    `mapstructure:"db"`
 	}
 	JWT struct {
-		Secret      string `mapstructure:"secret"`
-		ExpireHours int    `mapstructure:"expire_hours"`
+		Algorithm      string `mapstructure:"algorithm"`
+		Secret         string `mapstructure:"secret"`
+		PrivateKeyPath string `mapstructure:"private_key_path"`
+		PublicKeyPath  string `mapstructure:"public_key_path"`
+		ExpireHours    int    `mapstructure:"expire_hours"`
 	}
 	Eth struct {
 		RPCURL          string `mapstructure:"rpc_url"`

@@ -1,17 +1,22 @@
 server:
   port: 8080
+  allowed_origins:
+    - "http://localhost:5173"
 
 database:
   dsn: "root:admin_123@tcp(127.0.0.1:13306)/nft_marketplace?charset=utf8mb4&parseTime=True&loc=Local"
 
 redis:
-  addr: "localhost:16379"
+  addr: "127.0.0.1:16379"
   password: ""
   db: 0
 
 jwt:
-  secret: "your_jwt_secret_key_32_chars_long"
-  expire_hours: 24
+  algorithm: "ES256"          # 可选: "HS256", "RS256", "ES256"
+  secret: ""                  # 仅 HS256 使用（留空或设为强随机字符串）
+  private_key_path: "keys/ec_private.pem"   # 非对称私钥路径
+  public_key_path: "keys/ec_public.pem"     # 非对称公钥路径
+  expire_hours: 1
 
 eth:
   rpc_url: "https://rpc.ankr.com/eth_sepolia/171af9a59b0721865e2bcbf242e39b917a762a9afa8d7eef55fae6b13d0d3619"   # 或 Infura/Alchemy

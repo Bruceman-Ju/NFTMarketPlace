@@ -49,6 +49,11 @@ func (r *RedisCache) AddListing(nft *models.ListedNFT) {
 	})
 }
 
+func (r *RedisCache) Set(key string, value any, ttl time.Duration) {
+	data, _ := json.Marshal(value)
+	r.client.Set(r.ctx, key, data, ttl)
+}
+
 func (r *RedisCache) RemoveListing(listID string) {
 	r.client.Del(r.ctx, "listing:"+listID)
 	// Note: ZREM requires scanning all user keys – not efficient.

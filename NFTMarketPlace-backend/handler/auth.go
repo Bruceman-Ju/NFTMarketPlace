@@ -1,7 +1,13 @@
 package handler
 
 import (
+	"NFTMarketPlace-backend/cache"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"NFTMarketPlace-backend/auth"
 	"NFTMarketPlace-backend/models"
@@ -10,10 +16,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type AuthHandler struct{}
+type AuthHandler struct {
+	jwtService *auth.JWTService
+}
 
-func NewAuthHandler() *AuthHandler {
-	return &AuthHandler{}
+func NewAuthHandler(jwtService *auth.JWTService) *AuthHandler {
+	return &AuthHandler{jwtService: jwtService}
 }
 
 // Login godoc
@@ -45,7 +53,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := auth.GenerateToken(req.Address)
+	token, err := h.jwtService.GenerateToken(req.Address)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
 		return
@@ -61,7 +69,22 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Success 200 {object} map[string]string
 // @Router /auth/nonce [get]
 func (h *AuthHandler) GetNonce(c *gin.Context) {
-	// 实际项目中应从 DB 读取用户专属 nonce（防重放）
-	// 此处简化为固定值或随机值
-	c.JSON(http.StatusOK, gin.H{"nonce": "Sign this message to login to NFT Marketplace"})
+	address := c.Query("address")
+
+	nonce, _ := generateNonce()
+
+	// 存储到 Redis，5 分钟过期
+	cache.NewRedis().Set(fmt.Sprintf("nonce:%s", address), nonce, 5*time.Minute)
+
+	c.JSON(http.StatusOK, gin.H{"nonce": nonce})
+}
+
+func generateNonce() (string, error) {
+	randomBytes := make([]byte, 16)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	randomPart := hex.EncodeToString(randomBytes)
+	return fmt.Sprintf("%s-%s", timestamp, randomPart), nil
 }

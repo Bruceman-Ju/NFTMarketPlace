@@ -1,12 +1,12 @@
 // src/App.tsx
-import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount } from 'wagmi';
-import { useState, useEffect } from 'react';
-import { useMarketplace } from './hooks/useMarketplace';
-import { parseEther } from 'viem';
+import {ConnectButton} from '@rainbow-me/rainbowkit';
+import {useAccount, useSignMessage} from 'wagmi';
+import {useState, useEffect} from 'react';
+import {useMarketplace} from './hooks/useMarketplace';
+import {parseEther} from 'viem';
 
 function App() {
-    const { isConnected } = useAccount();
+    const {isConnected, address: walletAddress} = useAccount();
     const marketplace = useMarketplace();
 
     // List Form
@@ -17,6 +17,18 @@ function App() {
     // Buy / Cancel
     const [inputListId, setInputListId] = useState('');
     const [buyPriceEth, setBuyPriceEth] = useState<string>('');
+
+    const [address, setAddress] = useState('');
+    const [token, setToken] = useState('');
+
+    const { signMessageAsync } = useSignMessage();
+
+    useEffect(() => {
+        if (isConnected && walletAddress && !token) {
+            console.log('Wallet connected, auto-login triggered');
+            generateToken();
+        }
+    }, [isConnected, walletAddress]);
 
     // Auto load listed NFT when inputListId changes
     useEffect(() => {
@@ -68,36 +80,82 @@ function App() {
             alert('Cancel failed');
         }
     };
+
+    const generateToken = async () => {
+        if (!walletAddress) {
+            alert('请先连接钱包');
+            return;
+        }
+
+        try {
+            // 1. 获取 nonce
+            const nonceRes = await fetch('http://localhost:8080/api/v1/auth/nonce');
+            const {nonce} = await nonceRes.json();
+
+            // 2. 使用 wagmi 签名（自动调用已连接的钱包）
+            const signature = await signMessageAsync({
+                message: nonce
+            });
+
+            // 3. 调用登录接口
+            const loginRes = await fetch('http://localhost:8080/api/v1/auth/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    address: walletAddress,
+                    nonce: nonce,
+                    signature: signature
+                })
+            });
+
+            const {token} = await loginRes.json();
+            setToken(token);
+            setAddress(address);
+
+            // 保存 token
+            localStorage.setItem('jwt_token', token);
+            alert('登录成功！');
+        } catch (error) {
+            console.error('Login failed:', error);
+            alert('登录失败：' + (error as Error).message);
+        }
+    }
+
+
     return (
-        <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto' }}>
-            <header style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-                <ConnectButton />
+        <div style={{padding: '2rem', maxWidth: '600px', margin: '0 auto'}}>
+            <header style={{display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem'}}>
+                <ConnectButton/>
             </header>
+            {/*<div></div>*/}
+            {/*<button onClick={generateToken}>*/}
+            {/*    {token ? `已登录：${walletAddress}` : '连接钱包登录'}*/}
+            {/*</button>*/}
 
             {!isConnected ? (
                 <p>Please connect your wallet</p>
             ) : (
                 <>
                     {/* List NFT */}
-                    <section style={{ marginBottom: '2rem' }}>
+                    <section style={{marginBottom: '2rem'}}>
                         <h2>List Your NFT</h2>
                         <input
                             placeholder="NFT Contract Address"
                             value={nftAddress}
                             onChange={(e) => setNftAddress(e.target.value)}
-                            style={{ display: 'block', width: '100%', marginBottom: '8px' }}
+                            style={{display: 'block', width: '100%', marginBottom: '8px'}}
                         />
                         <input
                             placeholder="Token ID"
                             value={tokenId}
                             onChange={(e) => setTokenId(e.target.value)}
-                            style={{ display: 'block', width: '100%', marginBottom: '8px' }}
+                            style={{display: 'block', width: '100%', marginBottom: '8px'}}
                         />
                         <input
                             placeholder="Price (ETH)"
                             value={price}
                             onChange={(e) => setPrice(e.target.value)}
-                            style={{ display: 'block', width: '100%', marginBottom: '8px' }}
+                            style={{display: 'block', width: '100%', marginBottom: '8px'}}
                         />
                         <button onClick={handleList} disabled={marketplace.isListing}>
                             {marketplace.isListing ? 'Listing...' : 'List NFT'}
@@ -111,23 +169,24 @@ function App() {
 
                     {/* Buy */}
                     <section>
-                        <h2>Buy or Cancel Listing</h2>
+                        <h2>Buy & Cancel Listing</h2>
                         <input
                             placeholder="List ID (bytes32)"
                             value={inputListId}
                             onChange={(e) => setInputListId(e.target.value)}
-                            style={{ display: 'block', width: '100%', marginBottom: '8px' }}
+                            style={{display: 'block', width: '100%', marginBottom: '8px'}}
                         />
 
                         {/* 调试信息 */}
-                        <div style={{ backgroundColor: '#f0f0f0', padding: '10px', marginBottom: '10px' }}>
+                        <div style={{backgroundColor: '#f0f0f0', padding: '10px', marginBottom: '10px'}}>
                             <p><strong>NFT Info:</strong></p>
                             <p>listId: {marketplace.listId || 'null'}</p>
                             <p>listedNFT exists: {marketplace.listedNFT?.price ? 'Yes' : 'No'}</p>
                             {marketplace.listedNFT && (
                                 <>
                                     <p>Price (wei): {marketplace.listedNFT.price?.toString()}</p>
-                                    <p>Price (ETH): {marketplace.listedNFT.price ? Number(marketplace.listedNFT.price) / 1e18 : 'N/A'} ETH</p>
+                                    <p>Price
+                                        (ETH): {marketplace.listedNFT.price ? Number(marketplace.listedNFT.price) / 1e18 : 'N/A'} ETH</p>
                                     <p>Seller: {marketplace.listedNFT.seller}</p>
                                 </>
                             )}
@@ -135,17 +194,16 @@ function App() {
                         <button
                             onClick={handleCancel}
                             disabled={marketplace.isCanceling}
-                            style={{ marginLeft: '8px' }}
+                            style={{marginBottom: '8px'}}
                         >
                             {marketplace.isCanceling ? 'Canceling...' : 'Cancel Listing'}
                         </button>
-                        <div></div>
                         {marketplace.listedNFT?.price && (
                             <p>
                                 Price: {Number(marketplace.listedNFT.price) / 1e18} ETH
                                 <button
                                     onClick={() => setBuyPriceEth(String(Number(marketplace.listedNFT!.price) / 1e18))}
-                                    style={{ marginLeft: '8px' }}
+                                    style={{marginLeft: '8px'}}
                                 >
                                     Use This Price
                                 </button>
@@ -155,7 +213,7 @@ function App() {
                             placeholder="Buy Price (ETH)"
                             value={buyPriceEth}
                             onChange={(e) => setBuyPriceEth(e.target.value)}
-                            style={{ display: 'block', width: '100%', marginBottom: '8px' }}
+                            style={{display: 'block', width: '100%', marginBottom: '8px'}}
                         />
                         <button onClick={handleBuy} disabled={marketplace.isBuying}>
                             {marketplace.isBuying ? 'Buying...' : 'Buy NFT'}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -9,18 +10,14 @@ import (
 	"NFTMarketPlace-backend/cache"
 	"NFTMarketPlace-backend/config"
 	"NFTMarketPlace-backend/eth"
-	"NFTMarketPlace-backend/handler"
 	"NFTMarketPlace-backend/listener"
 	"NFTMarketPlace-backend/repository"
 	"NFTMarketPlace-backend/routes"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	swaggerFiles "github.com/swaggo/files"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-
-	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // @title NFT Marketplace API
@@ -67,12 +64,7 @@ func main() {
 
 	// HTTP server
 	r := gin.Default()
-
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-
-	listingHandler := handler.NewListingHandler(repo)
-	saleHandler := handler.NewSaleHandler(repo)
-	routes.RegisterRoutes(r, listingHandler, saleHandler)
+	routes.RegisterRoutes(r, repo)
 
 	srv := &http.Server{
 		Addr:    ":" + strconv.Itoa(config.Cfg.Server.Port),
@@ -80,7 +72,7 @@ func main() {
 	}
 
 	logrus.Infof("Server starting on port %d", config.Cfg.Server.Port)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logrus.Fatalf("Server failed: %v", err)
 	}
 }
