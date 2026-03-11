@@ -1,4 +1,3 @@
-// src/wagmi.ts
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { sepolia } from 'viem/chains';
 import { http } from 'viem';

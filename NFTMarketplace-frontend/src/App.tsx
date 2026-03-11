@@ -1,4 +1,3 @@
-// src/App.tsx
 import {ConnectButton} from '@rainbow-me/rainbowkit';
 import {useAccount, useSignMessage} from 'wagmi';
 import {useState, useEffect} from 'react';

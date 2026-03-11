@@ -152,6 +152,22 @@ create table sync_state
     updated_at           timestamp default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP
 );
 ```
+### 3. 创建非对称加密文件
+
+``` bash
+# 项目根目录下创建密钥目录
+mkdir -p keys
+
+# 生成私钥（PEM 格式）
+openssl ecparam -name prime256v1 -genkey -noout -out keys/ec_private.pem
+
+# 从私钥导出公钥
+openssl ec -in keys/ec_private.pem -pubout -out keys/ec_public.pem
+
+# 设置权限
+chmod 600 keys/ec_private.pem
+chmod 644 keys/ec_public.pem
+```
 
 ## 四、本地运行
 
@@ -165,13 +181,5 @@ Swagger 文档地址：http://localhost:8080/swagger/index.html
 
 ``` bash
 docker build -t nft-marketplace-backend .
-docker run -p 8080:8080 --env-file .env nft-marketplace-backend
-```
-
-``` bash
-swag init
-```
-
-``` bash
-docker-compose -f docker-compose.yml up -d
+docker run -p 8080:8080 nft-marketplace-backend
 ```

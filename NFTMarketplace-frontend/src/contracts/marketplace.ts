@@ -1,4 +1,3 @@
-// src/contracts/marketplace.ts
 import MarketplaceABI from './NFTMarketPlace.json'; // 直接导入默认导出
 import { MARKETPLACE_ADDRESS } from '../config';
 

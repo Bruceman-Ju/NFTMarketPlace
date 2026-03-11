@@ -1,4 +1,3 @@
-// src/hooks/useMarketplace.ts
 import {useMemo, useState} from 'react';
 import {
     useWriteContract,
