@@ -19,6 +19,7 @@
 
 ```
 NFTMarketPlace-backend/
+├── abi/               # 合约 ABI 文件
 ├── auth/              # JWT 认证与签名验证
 ├── cache/             # Redis 缓存层
 ├── config/            # 配置文件加载
