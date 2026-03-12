@@ -492,7 +492,6 @@ describe("NFTMarketPlace", function () {
     describe("onERC721Received", () => {
         it("Should return correct selector when not paused", async () => {
             const selector = await marketplace.onERC721Received.staticCall(ethers.ZeroAddress, ethers.ZeroAddress, 0, "0x");
-            console.log( selector);
             expect(selector).to.equal("0x150b7a02");
         });
 

@@ -15,7 +15,25 @@
 - JWT
 - Swagger
 
-## 三、环境搭建
+## 三、项目结构
+
+```
+NFTMarketPlace-backend/
+├── auth/              # JWT 认证与签名验证
+├── cache/             # Redis 缓存层
+├── config/            # 配置文件加载
+├── eth/               # Ethereum 客户端与事件解析
+├── handler/           # HTTP 请求处理器
+├── listener/          # 区块链事件监听器
+├── middleware/        # Gin 中间件
+├── models/            # 数据模型
+├── repository/        # 数据库访问层
+├── routes/            # 路由配置
+├── utils/             # 工具函数
+└── main.go            # 入口文件
+```
+
+## 四、环境搭建
 
 ### 1. 配置文件
 
@@ -152,7 +170,7 @@ create table sync_state
     updated_at           timestamp default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP
 );
 ```
-### 3. 创建非对称加密文件
+### 3. 创建 JWT 非对称加密文件
 
 ``` bash
 # 项目根目录下创建密钥目录
@@ -169,17 +187,38 @@ chmod 600 keys/ec_private.pem
 chmod 644 keys/ec_public.pem
 ```
 
-## 四、本地运行
+## 五、本地运行
 
 ### 1. 启动服务
 ``` bash
 go run main.go
 ```
-
+运行成功后，截图如下：
+![img.png](img.png)
 ### 2. Swap API
 Swagger 文档地址：http://localhost:8080/swagger/index.html
 
-``` bash
-docker build -t nft-marketplace-backend .
-docker run -p 8080:8080 nft-marketplace-backend
+### 3. JWT 认证 (auth/)
+
+``` go
+// 基于钱包签名的登录流程
+1. GET /api/v1/auth/nonce?address=0x...  // 获取随机 nonce
+2. 使用钱包签名 nonce
+3. POST /api/v1/auth/login              // 验证签名获取 JWT
 ```
+
+**加密算法：** ES256（椭圆曲线数字签名）
+
+### 4. API 接口
+
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| GET | `/api/v1/auth/nonce` | 获取登录 nonce | ❌ |
+| POST | `/api/v1/auth/login` | 钱包签名登录 | ❌ |
+| GET | `/api/v1/user/me` | 当前用户信息 | ✅ |
+| GET | `/api/v1/listings` | 所有上架列表 | ✅ |
+| GET | `/api/v1/listings/user/:address` | 用户上架列表 | ✅ |
+| GET | `/api/v1/sales/seller/:address` | 用户销售记录 | ✅ |
+| GET | `/api/v1/sales/buyer/:address` | 用户购买记录 | ✅ |
+
+---
