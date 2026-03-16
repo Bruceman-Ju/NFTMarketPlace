@@ -5,12 +5,14 @@ import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/acce
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgradeable, UUPSUpgradeable, IERC721Receiver {
     // --- Roles ---
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant UN_PAUSER_ROLE = keccak256("UN_PAUSER_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
     bytes32 public constant LOGIC_ROLE = keccak256("LOGIC_ROLE");
 
@@ -37,7 +39,9 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     mapping(bytes32 => ListedNFT) public listedNFTs;
 
     function initialize(
-        address defaultAdmin, address pauser, address upgrader,address _logicOperator, address _wallet,uint256 _platformFee)
+        address _defaultAdmin, address _pauser, address _unPauser,
+        address _upgrader, address _logicOperator, address _wallet,
+        uint256 _platformFee)
     public
     initializer
     {
@@ -47,9 +51,10 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
         __Pausable_init();
         __AccessControl_init();
 
-        _grantRole(DEFAULT_ADMIN_ROLE, defaultAdmin);
-        _grantRole(PAUSER_ROLE, pauser);
-        _grantRole(UPGRADER_ROLE, upgrader);
+        _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
+        _grantRole(PAUSER_ROLE, _pauser);
+        _grantRole(UN_PAUSER_ROLE, _unPauser);
+        _grantRole(UPGRADER_ROLE, _upgrader);
         _grantRole(LOGIC_ROLE, _logicOperator);
 
         platformWalletAddress = _wallet;
@@ -62,8 +67,8 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     public
     whenNotPaused
     {
-        require(_nftAddress != address(0),"NFT address invalid");
-        require(price > 0,"NFT price less than 0");
+        require(_nftAddress != address(0), "NFT address invalid");
+        require(price > 0, "NFT price less than 0");
         // check whether _nftAddress is instance of IERC721
         require(
             IERC165(_nftAddress).supportsInterface(ERC721_INTERFACE_ID),
@@ -78,16 +83,16 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
             revert("NFT does not exist");
         }
 
-        require(msg.sender == owner,"Target NFT not belong to owner");
+        require(msg.sender == owner, "Target NFT not belong to owner");
         bool isApproved =
             IERC721(_nftAddress).getApproved(tokenId) == address(this) ||
             IERC721(_nftAddress).isApprovedForAll(owner, address(this));
-        require(isApproved,"NFT not approved for marketplace");
+        require(isApproved, "NFT not approved for marketplace");
 
         uint256 expiredAt = block.timestamp + listingDuration;
 
         bytes32 listId = _getListedNFTId(_nftAddress, tokenId);
-        listedNFTs[listId] = ListedNFT(_nftAddress, tokenId, price, block.timestamp, owner,expiredAt);
+        listedNFTs[listId] = ListedNFT(_nftAddress, tokenId, price, block.timestamp, owner, expiredAt);
 
         IERC721(_nftAddress).safeTransferFrom(owner, address(this), tokenId);
 
@@ -111,17 +116,13 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
 
         uint256 feeAmount = (price_ * platformFee) / 10000;
         uint256 amount = price_ - feeAmount;
-        require(msg.value == price_,"Must send exact amount");
+        require(msg.value == price_, "Must send exact amount");
 
-        if (amount > 0){
-            (bool stateTransfer,) = payable(seller_).call{value: amount}("");
-            require(stateTransfer, "Failed to transfer eth amount");
-        }
+        (bool stateTransfer,) = payable(seller_).call{value: amount}("");
+        require(stateTransfer, "Failed to transfer eth amount");
 
-        if(feeAmount > 0){
-            (bool stateFee,) = payable(platformWalletAddress).call{value: feeAmount}("");
-            require(stateFee, "Failed to collect fee");
-        }
+        (bool stateFee,) = payable(platformWalletAddress).call{value: feeAmount}("");
+        require(stateFee, "Failed to collect fee");
 
         IERC721(nftAddress_).safeTransferFrom(address(this), msg.sender, tokenId_);
 
@@ -134,7 +135,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     whenNFTExistAndNotExpired(listId)
     {
         ListedNFT storage nft = listedNFTs[listId];
-        require(nft.seller == msg.sender,"Only seller can cancel NFT");
+        require(nft.seller == msg.sender, "Only seller can cancel NFT");
 
         address nftAddress_ = nft.nftAddress;
         address seller_ = nft.seller;
@@ -158,7 +159,6 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
             ListedNFT storage nft = listedNFTs[listId];
             if (nft.nftAddress != address(0) && nft.expiredAt < block.timestamp) {
                 address nftAddress_ = nft.nftAddress;
-                if(!IERC165(nftAddress_).supportsInterface(ERC721_INTERFACE_ID)) continue;
                 address seller_ = nft.seller;
                 uint256 tokenId_ = nft.tokenId;
                 delete listedNFTs[listId];
@@ -174,17 +174,16 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     returns (bytes32)
     {
         uint256 userNon = userNonce[msg.sender]++;
-        bytes32 listId = keccak256(abi.encode(msg.sender,userNon,_nftAddress, tokenId));
+        bytes32 listId = keccak256(abi.encode(msg.sender, userNon, _nftAddress, tokenId));
         return listId;
     }
 
     modifier whenNFTExistAndNotExpired(bytes32 listId) {
         ListedNFT storage nft = listedNFTs[listId];
-        require(nft.nftAddress != address(0),"Target NFT not exist");
-        require(nft.expiredAt >= block.timestamp,"NFT expired");
+        require(nft.nftAddress != address(0), "Target NFT not exist");
+        require(nft.expiredAt >= block.timestamp, "NFT expired");
         _;
     }
-
 
     // --- Setting functions ---
     function setPlatformWalletAddress(address _wallet)
@@ -201,6 +200,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     {
         // max fee must less than 10%
         require(_fee <= 1000, "Fee too high");
+        require(_fee > 0, "Fee must greater than 0");
         platformFee = _fee;
     }
 
@@ -215,7 +215,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
         _pause();
     }
 
-    function unpause() public onlyRole(PAUSER_ROLE) {
+    function unpause() public onlyRole(UN_PAUSER_ROLE) {
         _unpause();
     }
 
@@ -231,7 +231,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
         uint256,
         bytes memory
     ) external view returns (bytes4) {
-        require(!paused(),"Can't receive NFT when contract paused.");
+        require(!paused(), "Can't receive NFT when contract paused.");
         return IERC721Receiver.onERC721Received.selector;
     }
 

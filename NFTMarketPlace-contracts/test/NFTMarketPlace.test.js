@@ -10,8 +10,10 @@ const timeTravel = async (seconds) => {
 describe("NFTMarketPlace", function () {
     let marketplace;
     let mockNFT;
+    let unReceiveETH;
     let owner;
     let pauser;
+    let unPauser;
     let upgrader;
     let logicOperator;
     let seller;
@@ -24,7 +26,8 @@ describe("NFTMarketPlace", function () {
     const LISTING_DURATION = 30 * 24 * 60 * 60; // 30 days
 
     before(async () => {
-        [owner, pauser, upgrader, logicOperator, seller, buyer, platformWallet, random] = await ethers.getSigners();
+        [owner, pauser,unPauser, upgrader, logicOperator, seller, buyer, platformWallet, random]
+            = await ethers.getSigners();
 
         userMap.set(seller.address, 0);
         userMap.set(buyer.address, 0);
@@ -35,16 +38,22 @@ describe("NFTMarketPlace", function () {
         await mockNFT.waitForDeployment();
 
         // Deploy Marketplace (UUPS proxy)
-        const MarketPlace = await ethers.getContractFactory("NFTMarketPlace");
+        const MarketPlace = await ethers.getContractFactory("NFTMarketPlaceTestHelper");
         marketplace = await upgrades.deployProxy(MarketPlace, [
             owner.address,
             pauser.address,
+            unPauser.address,
             upgrader.address,
             logicOperator.address,
             platformWallet.address,
             PLATFORM_FEE
         ], { initializer: 'initialize' });
         await marketplace.waitForDeployment();
+
+        // Deploy UnReceiveETH to test transfer ETH
+        const UnReceiveETH = await ethers.getContractFactory("UnReceiveETH");
+        unReceiveETH = await UnReceiveETH.deploy();
+        await unReceiveETH.waitForDeployment();
     });
 
     async function getListId(userAddress, nftAddress, tokenId) {
@@ -64,11 +73,42 @@ describe("NFTMarketPlace", function () {
             expect(await marketplace.listingDuration()).to.equal(LISTING_DURATION);
         });
 
+        it("Should initialize only be called once", async () => {
+            const NFTMarketPlace = await ethers.getContractFactory("NFTMarketPlace");
+            const nftMarketPlace = await NFTMarketPlace.deploy();
+            await nftMarketPlace.waitForDeployment();
+
+            await expect(
+                nftMarketPlace.initialize(
+                    owner.address,
+                    pauser.address,
+                    unPauser.address,
+                    upgrader.address,
+                    logicOperator.address,
+                    platformWallet.address,
+                    PLATFORM_FEE
+                )
+            ).to.emit(nftMarketPlace, "Initialized");
+
+            await expect(
+                nftMarketPlace.initialize(
+                    owner.address,
+                    pauser.address,
+                    unPauser.address,
+                    upgrader.address,
+                    logicOperator.address,
+                    platformWallet.address,
+                    PLATFORM_FEE
+                )
+            ).to.be.revertedWithCustomError(nftMarketPlace, "InvalidInitialization")
+        });
+
         it("Should revert if wallet is zero address", async () => {
             const MarketPlace = await ethers.getContractFactory("NFTMarketPlace");
             await expect(
                 upgrades.deployProxy(MarketPlace, [
-                    owner.address, pauser.address, upgrader.address, logicOperator.address, ethers.ZeroAddress, PLATFORM_FEE
+                    owner.address, pauser.address,unPauser.address,
+                    upgrader.address, logicOperator.address, ethers.ZeroAddress, PLATFORM_FEE
                 ], { initializer: 'initialize' })
             ).to.be.revertedWith("Invalid wallet address");
         });
@@ -77,7 +117,8 @@ describe("NFTMarketPlace", function () {
             const MarketPlace = await ethers.getContractFactory("NFTMarketPlace");
             await expect(
                 upgrades.deployProxy(MarketPlace, [
-                    owner.address, pauser.address, upgrader.address, logicOperator.address, platformWallet.address, 1001
+                    owner.address, pauser.address, unPauser.address,
+                    upgrader.address, logicOperator.address, platformWallet.address, 1001
                 ], { initializer: 'initialize' })
             ).to.be.revertedWith("Fee too high");
         });
@@ -243,6 +284,43 @@ describe("NFTMarketPlace", function () {
             await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") }))
                 .to.be.revertedWith("NFT expired");
         });
+
+        it("Should revert if seller address of NFT is invalid",async ()=> {
+            // mint
+            const tokenId = 140;
+            await mockNFT.mint(seller.address, tokenId);
+            // approve
+            await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
+            // list
+            // 除了 revert tests 之外，每次 listNFT,就计算一次 listId，这样就让 userNonce 与合约中的基数相同了。
+            await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
+
+            await marketplace.testSetInvalidSellerAddress(listId,unReceiveETH);
+
+            // buy
+            await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") }))
+                .to.be.revertedWith("Failed to transfer eth amount");
+
+        });
+
+        it("Should revert if platformWalletAddress is invalid",async () => {
+            // mint
+            const tokenId = 150;
+            await mockNFT.mint(seller.address, tokenId);
+            // approve
+            await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
+            // list
+            // 除了 revert tests 之外，每次 listNFT,就计算一次 listId，这样就让 userNonce 与合约中的基数相同了。
+            await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
+
+            await marketplace.connect(logicOperator).setPlatformWalletAddress(unReceiveETH);
+
+            // buy
+            await expect(marketplace.connect(buyer).buyNFT(listId, { value: ethers.parseEther("2") }))
+                .to.be.revertedWith("Failed to collect fee");
+        });
     });
 
     describe("Cancel Listing", () => {
@@ -355,6 +433,26 @@ describe("NFTMarketPlace", function () {
                 "AccessControlUnauthorizedAccount"
             ).withArgs(seller.address, await marketplace.LOGIC_ROLE());
         });
+        it("Should revert if contract paused",async () => {
+            // mint
+            let tokenId = 330;
+            await mockNFT.mint(seller.address, tokenId);
+            // approve
+            await mockNFT.connect(seller).approve(await marketplace.getAddress(), tokenId);
+            // list
+            await marketplace.connect(seller).listNFT(await mockNFT.getAddress(), tokenId, ethers.parseEther("2"));
+            const listId = await getListId(seller.address, await mockNFT.getAddress(), tokenId);
+
+            await timeTravel(LISTING_DURATION + 1);
+            await marketplace.connect(pauser).pause();
+
+            await expect(marketplace.connect(logicOperator).cleanupExpiredBatch([listId]))
+                .to.be.revertedWithCustomError(
+                    marketplace,
+                    "EnforcedPause"
+                );
+            await marketplace.connect(unPauser).unpause();
+        });
     });
 
     describe("Settings", () => {
@@ -374,6 +472,19 @@ describe("NFTMarketPlace", function () {
             expect(await marketplace.platformFee()).to.equal(500);
         });
 
+        it("Should revert if user not with LOGIC_ROLE", async () => {
+            await expect(marketplace.connect(upgrader).setPlatformFee(500))
+                .to.be.revertedWithCustomError(
+                    marketplace,
+                    "AccessControlUnauthorizedAccount"
+                ).withArgs(upgrader.address, await marketplace.LOGIC_ROLE());
+        });
+
+        it("Should revert if platform fee less than 0",async ()=> {
+            await expect(marketplace.connect(logicOperator).setPlatformFee(0))
+                .to.be.revertedWith("Fee must greater than 0");
+        });
+
         it("Should reject fee > 1000", async () => {
             await expect(marketplace.connect(logicOperator).setPlatformFee(1001))
                 .to.be.revertedWith("Fee too high");
@@ -382,6 +493,13 @@ describe("NFTMarketPlace", function () {
         it("Should update listing duration", async () => {
             await marketplace.connect(logicOperator).setListingDuration(60);
             expect(await marketplace.listingDuration()).to.equal(60);
+        });
+        it("Should revert if user not logic role update listing duration",async ()=> {
+            await expect(marketplace.connect(seller).setListingDuration(60))
+                .to.be.revertedWithCustomError(
+                    marketplace,
+                    "AccessControlUnauthorizedAccount"
+                ).withArgs(seller.address, await marketplace.LOGIC_ROLE());
         });
 
         it("Non-LOGIC_ROLE cannot change settings", async () => {
@@ -398,7 +516,7 @@ describe("NFTMarketPlace", function () {
             await marketplace.connect(pauser).pause();
             expect(await marketplace.paused()).to.be.true;
 
-            await marketplace.connect(pauser).unpause();
+            await marketplace.connect(unPauser).unpause();
             expect(await marketplace.paused()).to.be.false;
         });
 
@@ -407,6 +525,13 @@ describe("NFTMarketPlace", function () {
                 marketplace,
                 "AccessControlUnauthorizedAccount"
             ).withArgs(seller.address, await marketplace.PAUSER_ROLE());
+        });
+
+        it("Non-UNPAUSER cannot unpause", async () => {
+            await expect(marketplace.connect(seller).unpause()).to.be.revertedWithCustomError(
+                marketplace,
+                "AccessControlUnauthorizedAccount"
+            ).withArgs(seller.address, await marketplace.UN_PAUSER_ROLE());
         });
 
         it("Paused blocks listing", async () => {
@@ -423,7 +548,7 @@ describe("NFTMarketPlace", function () {
                     "EnforcedPause"
                 );
 
-            await marketplace.connect(pauser).unpause();
+            await marketplace.connect(unPauser).unpause();
         });
 
         it("Paused blocks buying", async () => {
@@ -442,7 +567,7 @@ describe("NFTMarketPlace", function () {
                     marketplace,
                     "EnforcedPause"
                 );
-            await marketplace.connect(pauser).unpause();
+            await marketplace.connect(unPauser).unpause();
 
         });
 
@@ -465,27 +590,44 @@ describe("NFTMarketPlace", function () {
                     marketplace,
                     "EnforcedPause"
                 );
-            await marketplace.connect(pauser).unpause();
+            await marketplace.connect(unPauser).unpause();
 
         });
     });
 
-    describe("Upgradeability", () => {
-        it("UPGRADER_ROLE can upgrade", async () => {
-            const NFTMarketPlaceV2 = await ethers.getContractFactory("NFTMarketPlaceV2",upgrader);
+    describe("Upgradeability tests", () => {
+        let nftMarketPlace;
+        beforeEach(async () => {
+            // Deploy Marketplace (UUPS proxy)
+            const NftMarketPlace = await ethers.getContractFactory("NFTMarketPlace");
+            nftMarketPlace = await upgrades.deployProxy(NftMarketPlace, [
+                owner.address,
+                pauser.address,
+                unPauser.address,
+                upgrader.address,
+                logicOperator.address,
+                platformWallet.address,
+                PLATFORM_FEE
+            ], { initializer: 'initialize' });
+            await nftMarketPlace.waitForDeployment();
+        });
 
-            const marketplaceV2 = await upgrades.upgradeProxy(await marketplace.getAddress(), NFTMarketPlaceV2);
+        it("UPGRADER_ROLE can upgrade", async () => {
+
+            const NFTMarketPlaceV2 = await ethers.getContractFactory("NFTMarketPlaceTestHelper",upgrader);
+
+            const marketplaceV2 = await upgrades.upgradeProxy(await nftMarketPlace.getAddress(), NFTMarketPlaceV2);
             expect(await marketplaceV2.testUpgrade()).to.equal(true);
         });
 
         it("Non-UPGRADER cannot upgrade", async () => {
-            const NFTMarketPlaceV2 = await ethers.getContractFactory("NFTMarketPlaceV2",seller);
+            const NFTMarketPlaceV2 = await ethers.getContractFactory("NFTMarketPlaceTestHelper",seller);
 
-            await expect(upgrades.upgradeProxy(await marketplace.getAddress(), NFTMarketPlaceV2))
+            await expect(upgrades.upgradeProxy(await nftMarketPlace.getAddress(), NFTMarketPlaceV2))
                 .to.be.revertedWithCustomError(
-                    marketplace,
+                    nftMarketPlace,
                     "AccessControlUnauthorizedAccount"
-                ).withArgs(seller.address, await marketplace.UPGRADER_ROLE());
+                ).withArgs(seller.address, await nftMarketPlace.UPGRADER_ROLE());
         });
     });
 
