@@ -2,6 +2,8 @@ package listener
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"math/big"
 	"time"
 
@@ -19,7 +21,6 @@ import (
 const (
 	maxBlocksPerRequest = 100 // 根据 RPC 服务商限制调整（Infura: 10k, Alchemy: 10k, 本地节点可更大）
 	batchSize           = 10  // 每批处理的日志数量
-	concurrentWorkers   = 3   // 并行 worker 数（谨慎使用，并行可能打满 RPC）
 )
 
 var contractAbi = eth.ContractAbi // 假设你在 eth 包暴露了它
@@ -45,43 +46,101 @@ func NewListener(ethHttpClient *eth.Client, ethWebsocketClient *eth.Client, repo
 }
 
 func (l *Listener) Start(ctx context.Context) {
-	lastBlock := l.dbRepo.GetLastSyncBlock()
-	logrus.Infof("Last synced block: %d", lastBlock)
 
-	current, _ := l.ethHttpClient.GetBlockNumber()
-	logrus.Infof("Current block: %d", current)
+	latestBlock := make(chan uint64, 1)
+	// 启动监听协程
+	go l.startListener(ctx, latestBlock)
+	// 启动同步协程
+	go l.syncHistory(ctx, latestBlock)
 
-	// Sync historical
-	from := l.startBlock
-	if lastBlock > from {
-		from = lastBlock + 1
-	}
-	if from <= current {
-		logrus.Infof("Syncing historical events from %d to %d", from, current)
-		l.syncRange(ctx, from, current)
-	}
-
-	// Watch new
-	logrus.Info("Starting real-time event watcher...")
-	l.watchNew(ctx, current+1)
 }
 
-func (l *Listener) syncRange(ctx context.Context, from, to uint64) {
-	logrus.Infof("Syncing historical events from block %d to %d", from, to)
+func (l *Listener) startListener(ctx context.Context, latestBlock chan uint64) {
 
-	var current uint64 = from
+	logrus.Info("Starting listener...")
+	headers := make(chan *types.Header)
+	var sub, subErr = l.ethWebsocketClient.SubscribeLatestBlock(ctx, headers)
+	if subErr != nil {
+		log.Fatal("Failed to subscribe to new heads:", subErr)
+	}
+	defer sub.Unsubscribe()
+
+	for {
+		select {
+		case header := <-headers:
+			logrus.Infof("New block: %d", header.Number.Uint64())
+			latestBlock <- header.Number.Uint64()
+		case err := <-sub.Err():
+			log.Printf("Subscription error: %v", err)
+			sub, subErr = l.ethWebsocketClient.SubscribeLatestBlock(ctx, headers)
+			if subErr != nil {
+				log.Fatal("Subscribe err, try to re-subscribe to latest block:", subErr)
+			}
+			return
+		}
+	}
+}
+func (l *Listener) syncHistory(ctx context.Context, latestBlockNum <-chan uint64) {
+
+	// 1. check checkpoint in db
+	lastSyncBlock := l.dbRepo.GetLastSyncBlock()
+	current := lastSyncBlock.LastProcessedBlock
+
 	step := uint64(maxBlocksPerRequest)
 
-	for current <= to {
+	syncBlockNum, recentBlockNumErr := l.ethHttpClient.GetBlockNumber()
+	if recentBlockNumErr != nil {
+		logrus.Fatalf("Failed to get recent block number: %v", recentBlockNumErr)
+		return
+	}
+
+	latestFinalHeader, finalBLockErr := l.ethHttpClient.GetFinalizedBlockNumber()
+
+	if finalBLockErr != nil {
+		logrus.Fatalf("Failed to get finalized block number: %v", finalBLockErr)
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			logrus.Info("History sync stopped by system")
+			return
+		case latest := <-latestBlockNum:
+			logrus.Infof("Received latest block num %d", latest)
+			syncBlockNum = latest
+		default:
+			// 没有新区块就继续执行。
+		}
+
+		if current == syncBlockNum {
+			timer := time.NewTimer(12 * time.Second)
+			logrus.Info("All historical events sync complete, will sleep 12 seconds")
+			select {
+			case <-ctx.Done():
+				logrus.Info("History sync stopped by system")
+				return
+			case latest := <-latestBlockNum:
+				syncBlockNum = latest
+				if !timer.Stop() {
+					<-timer.C
+				}
+			case <-timer.C:
+				logrus.Info("12 seconds gone without new block subscribed")
+				continue
+			}
+		}
+
+		logrus.Infof("Syncing historical events from block %d to block %d", current, syncBlockNum)
+
 		end := current + step - 1
-		if end > to {
-			end = to
+		if end > syncBlockNum {
+			end = syncBlockNum
 		}
 
 		logrus.Infof("Fetching logs from %d to %d...", current, end)
-		query := l.buildQuery(current, end)
 
-		// 带重试的 Fetch
+		query := l.buildQuery(current, end)
 		var logs []types.Log
 		var err error
 		for attempt := 0; attempt < 3; attempt++ {
@@ -95,62 +154,46 @@ func (l *Listener) syncRange(ctx context.Context, from, to uint64) {
 
 		if err != nil {
 			logrus.Fatalf("Failed to fetch logs after retries [%d-%d]: %v", current, end, err)
+			break
 		}
 
-		// 分批处理日志（避免内存堆积）
-		l.processLogsInBatches(logs)
-
-		// 更新最后同步块（每段成功后更新，实现断点续传）
-		l.dbRepo.UpdateSyncBlock(end)
+		if current < latestFinalHeader.Number.Uint64() {
+			logrus.Infof("Sync with final block %d", current)
+			// db
+			// 分批处理日志（避免内存堆积）
+			l.processLogsInBatches(logs)
+		} else if current == latestFinalHeader.Number.Uint64() {
+			logrus.Info("Update final block number")
+			// 更新最新 final 区块
+			latestFinalHeader, finalBLockErr = l.ethHttpClient.GetFinalizedBlockNumber()
+		} else {
+			logrus.Info("Start sync pending block %d", current)
+			// redis
+			fmt.Println("Redis done")
+		}
 
 		current = end + 1
 
 		// 防止 RPC 限流（可选）
 		time.Sleep(100 * time.Millisecond)
 	}
-
-	logrus.Info("Historical sync completed.")
 }
 
-// 分批处理日志（控制内存和 DB 压力）
+// 分批处理日志
 func (l *Listener) processLogsInBatches(logs []types.Log) {
-	for i := 0; i < len(logs); i += batchSize {
+	logsCapacity := len(logs)
+	for i := 0; i < logsCapacity; i += batchSize {
 		end := i + batchSize
-		if end > len(logs) {
-			end = len(logs)
+		if end > logsCapacity {
+			end = logsCapacity
 		}
 		batch := logs[i:end]
+		fmt.Println("Start is ", i, "end is ", end)
 
-		// 可选：并行处理 batch（注意 DB 并发安全）
 		l.processLogs(batch)
 
-		// 可选：打印进度
 		if i%1000 == 0 {
-			logrus.Debugf("Processed %d/%d logs in current segment", i, len(logs))
-		}
-	}
-}
-
-func (l *Listener) watchNew(ctx context.Context, from uint64) {
-	query := l.buildQuery(from, 0) // 0 = latest
-	ch := make(chan types.Log)
-	sub, err := l.ethWebsocketClient.SubscribeFilterLogs(ctx, query, ch)
-	if err != nil {
-		logrus.Fatalf("Subscribe failed: %v", err)
-	}
-	defer sub.Unsubscribe()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case err := <-sub.Err():
-			logrus.Errorf("Subscription error: %v", err)
-			time.Sleep(5 * time.Second)
-			// reconnect logic omitted for brevity
-		case log := <-ch:
-			l.processLog(log)
-			l.dbRepo.UpdateSyncBlock(log.BlockNumber)
+			logrus.Debugf("Processed %d/%d logs in current segment", i, logsCapacity)
 		}
 	}
 }
@@ -168,25 +211,29 @@ func (l *Listener) buildQuery(from, to uint64) ethereum.FilterQuery {
 }
 
 func (l *Listener) processLogs(logs []types.Log) {
-	for _, log := range logs {
-		l.processLog(log)
+	for _, logItem := range logs {
+		l.processLog(logItem)
 	}
 }
 
 func (l *Listener) processLog(log types.Log) {
+	l.dbRepo.UpdateSyncBlock(log.BlockNumber)
 	switch log.Topics[0].Hex() {
 	case contractAbi.Events["NFTListed"].ID.Hex():
+
 		nft, err := eth.ParseNFTListed(log)
 		if err != nil {
 			logrus.Errorf("Parse listed error: %v", err)
 			return
 		}
+
 		errListNFT := l.dbRepo.CreateListing(nft)
 		if errListNFT != nil {
 			logrus.Errorf("Create listing error: %v", errListNFT)
 			return
 		}
-		l.cache.AddListing(nft)
+
+		l.cache.AddListing(nft, 30*time.Minute)
 
 	case contractAbi.Events["NFTSold"].ID.Hex():
 		sale, listID, err := eth.ParseNFTSold(log)
@@ -194,16 +241,19 @@ func (l *Listener) processLog(log types.Log) {
 			logrus.Errorf("Parse sold error: %v", err)
 			return
 		}
+
 		errSale := l.dbRepo.CreateSale(sale)
 		if errSale != nil {
 			logrus.Errorf("Create sale error: %v", errSale)
 			return
 		}
 		errListSold := l.dbRepo.MarkListingAsSold(listID)
+
 		if errListSold != nil {
 			logrus.Errorf("Mark listing as sold error: %v", errListSold)
 			return
 		}
+
 		l.cache.RemoveListing(listID)
 
 	case contractAbi.Events["NFTCanceled"].ID.Hex(), contractAbi.Events["NFTExpired"].ID.Hex():
@@ -212,11 +262,13 @@ func (l *Listener) processLog(log types.Log) {
 			logrus.Errorf("Parse canceled error: %v", err)
 			return
 		}
+
 		errNFTCancel := l.dbRepo.MarkListingAsInactive(listCanceled.ListID, "canceled") // or "expired"
 		if errNFTCancel != nil {
 			logrus.Errorf("Mark listing as inactive error: %v", errNFTCancel)
 			return
 		}
+
 		l.cache.RemoveListing(listCanceled.ListID)
 	}
 }

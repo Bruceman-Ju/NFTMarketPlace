@@ -44,12 +44,12 @@ func main() {
 	redisCache := cache.NewRedis()
 
 	// Eth client
-	ethHttpClient, err := eth.NewETHHttpClient(config.Cfg.Eth.RPCURL, config.Cfg.Eth.ContractAddress)
-	if err != nil {
+	ethHttpClient, httpErr := eth.NewETHHttpClient(config.Cfg.Eth.RPCURL, config.Cfg.Eth.ContractAddress)
+	if httpErr != nil {
 		log.Fatal("Failed to connect Ethereum node")
 	}
-	ethWebsocketClient, err := eth.NewETHWebsocketClient(config.Cfg.Eth.WebSocketURL, config.Cfg.Eth.ContractAddress)
-	if err != nil {
+	ethWebsocketClient, websocketErr := eth.NewETHWebsocketClient(config.Cfg.Eth.WebSocketURL, config.Cfg.Eth.ContractAddress)
+	if websocketErr != nil {
 		log.Fatal("Failed to connect Ethereum node")
 	}
 
@@ -57,22 +57,20 @@ func main() {
 	repo := repository.New(db)
 
 	// Start listener in goroutine
-	go func() {
-		l := listener.NewListener(ethHttpClient, ethWebsocketClient, repo, redisCache)
-		l.Start(context.Background())
-	}()
+	l := listener.NewListener(ethHttpClient, ethWebsocketClient, repo, redisCache)
+	l.Start(context.Background())
 
 	// HTTP server
-	r := gin.Default()
-	routes.RegisterRoutes(r, repo)
+	handler := gin.Default()
+	routes.RegisterRoutes(handler, repo)
 
-	srv := &http.Server{
+	service := &http.Server{
 		Addr:    ":" + strconv.Itoa(config.Cfg.Server.Port),
-		Handler: r,
+		Handler: handler,
 	}
 
 	logrus.Infof("Server starting on port %d", config.Cfg.Server.Port)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := service.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logrus.Fatalf("Server failed: %v", err)
 	}
 }

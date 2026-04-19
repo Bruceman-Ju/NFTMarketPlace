@@ -9,7 +9,13 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgradeable, UUPSUpgradeable, IERC721Receiver {
+contract NFTMarketPlace is
+    Initializable,
+    PausableUpgradeable,
+    AccessControlUpgradeable,
+    UUPSUpgradeable,
+    IERC721Receiver
+{
     // --- Roles ---
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant UN_PAUSER_ROLE = keccak256("UN_PAUSER_ROLE");
@@ -19,12 +25,12 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
     // --- Constants ---
     bytes4 private constant ERC721_INTERFACE_ID = 0x80ac58cd;
 
-    // --- State variables ---
-    address public platformWalletAddress;
     // e.g. 100 = 1%
     uint256 public platformFee;
     uint256 public listingDuration;
     mapping(address => uint256) private userNonce;
+    // --- State variables ---
+    address public platformWalletAddress;
 
     // --- Struct & enum & mappings---
     struct ListedNFT {
@@ -148,7 +154,7 @@ contract NFTMarketPlace is Initializable, PausableUpgradeable, AccessControlUpgr
         emit NFTCanceled(listId, nftAddress_, tokenId_, block.timestamp, msg.sender);
     }
 
-    function cleanupExpiredBatch(bytes32[] memory listIds)
+    function cleanupExpiredBatch(bytes32[] calldata listIds)
     public
     onlyRole(LOGIC_ROLE)
     whenNotPaused

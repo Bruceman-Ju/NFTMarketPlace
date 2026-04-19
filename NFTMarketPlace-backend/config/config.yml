@@ -20,6 +20,7 @@ jwt:
 
 eth:
   rpc_url: "https://rpc.ankr.com/eth_sepolia/171af9a59b0721865e2bcbf242e39b917a762a9afa8d7eef55fae6b13d0d3619"   # 或 Infura/Alchemy
-  websocket_url: "wss://sepolia.infura.io/ws/v3/9588e17bd54849e1acd18fabe6d63fb3"
+#  websocket_url: "wss://sepolia.infura.io/ws/v3/9588e17bd54849e1acd18fabe6d63fb3"
+  websocket_url: "wss://eth-sepolia.g.alchemy.com/v2/4gZRRWrE9vi0drk3L37D8"
   contract_address: "0x0559F2a6055Ac64aBEb3feFE4F36417C6676aF4b"          # 部署后的合约地址
-  start_block: 10382508                     # 初始同步区块（可设为部署区块）
+  start_block: 10517040                     # 初始同步区块（可设为部署区块）

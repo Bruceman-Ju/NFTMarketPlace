@@ -6,7 +6,8 @@ require('hardhat-gas-reporter');
 
 const MAINNET_RPC_URL = process.env.MAINNET_RPC_URL
 const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const DEFAULT_ADMIN = process.env.DEFAULT_ADMIN;
+const PAUSER = process.env.PAUSER;
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -29,7 +30,7 @@ module.exports = {
     },
     sepolia: {
       url: SEPOLIA_RPC_URL,
-      accounts: [PRIVATE_KEY],
+      accounts: [DEFAULT_ADMIN,PAUSER],
     },
   },
   etherscan: {

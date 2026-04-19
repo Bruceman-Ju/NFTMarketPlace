@@ -77,12 +77,13 @@ func (r *Repository) GetBuyerPurchases(address string, page, size int) ([]models
 }
 
 // Sync
-func (r *Repository) GetLastSyncBlock() uint64 {
-	var state models.SyncState
+func (r *Repository) GetLastSyncBlock() *models.SyncState {
+	var state *models.SyncState
 	r.db.FirstOrCreate(&state, models.SyncState{ID: 1})
-	return state.LastProcessedBlock
+	return state
 }
 
 func (r *Repository) UpdateSyncBlock(block uint64) {
-	r.db.Model(&models.SyncState{}).Where("id = 1").Update("last_processed_block", block)
+	r.db.Model(&models.SyncState{}).Where("id = 1").
+		Update("last_processed_block", block)
 }

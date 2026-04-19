@@ -2,14 +2,15 @@
 const { ethers, upgrades } = require("hardhat");
 
 async function main() {
-    const [deployer] = await ethers.getSigners();
+    const [deployer,pauserAddr] = await ethers.getSigners();
 
-    console.log("Deploying contracts with the account:", deployer.address);
+    console.log("Deploying contracts with the admin address ", deployer.address ," and pauser address", pauserAddr.address);
 
     const NFTMarketPlace = await ethers.getContractFactory("NFTMarketPlace");
 
     const defaultAdmin = deployer.address;
-    const pauser = deployer.address;
+    const pauser = pauserAddr.address;
+    const unpauser = deployer.address;
     const upgrader = deployer.address;
     const logicOperator = deployer.address;
     const platformWallet = deployer.address;
@@ -20,6 +21,7 @@ async function main() {
     const marketplace = await upgrades.deployProxy(NFTMarketPlace, [
         defaultAdmin,
         pauser,
+        unpauser,
         upgrader,
         logicOperator,
         platformWallet,

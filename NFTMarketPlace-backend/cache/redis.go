@@ -28,11 +28,11 @@ func NewRedis() *RedisCache {
 	}
 }
 
-func (r *RedisCache) AddListing(nft *models.ListedNFT) {
+func (r *RedisCache) AddListing(nft *models.ListedNFT, ttl time.Duration) {
 	// Cache individual
 	key := "listing:" + nft.ListID
 	data, _ := json.Marshal(nft)
-	r.client.Set(r.ctx, key, data, 24*time.Hour)
+	r.client.Set(r.ctx, key, data, ttl)
 
 	// Add to user set
 	userKey := "user:listings:" + nft.Seller
@@ -56,8 +56,6 @@ func (r *RedisCache) Set(key string, value any, ttl time.Duration) {
 
 func (r *RedisCache) RemoveListing(listID string) {
 	r.client.Del(r.ctx, "listing:"+listID)
-	// Note: ZREM requires scanning all user keys – not efficient.
-	// In practice, rely on DB as source of truth, use Redis as L1 cache with TTL.
 }
 
 func (r *RedisCache) GetListing(listID string) (*models.ListedNFT, error) {
